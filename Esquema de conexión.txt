@@ -1,0 +1,9 @@
+Arduino Uno #1,ESP32 DevKit V1,Notas
+TX,GPIO 16 (RX2),Usa divisor de tensión (5V -> 3.3V)
+RX,GPIO 17 (TX2),Directo (3.3V es suficiente para el Uno)
+GND,GND,Obligatorio unir tierras
+
+Arduino Uno #2,ESP32 DevKit V1,Notas
+TX,GPIO 12 (RX1),Usa divisor de tensión (5V -> 3.3V)
+RX,GPIO 13 (TX1),Directo
+GND,GND,Obligatorio unir tierras
