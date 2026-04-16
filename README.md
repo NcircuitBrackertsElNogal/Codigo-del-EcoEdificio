@@ -27,11 +27,11 @@ El proyecto se basa en pilares científicos fundamentales:
 ## 🛠️ Hardware y Materiales
 | Componente | Función |
 | :--- | :--- |
-| **Arduino Uno (x2) & Nano** | Cerebros distribuidos y procesamiento de datos. |
-| **ESP32** | Conectividad WiFi y monitoreo de variables ambientales. |
-| **LCD 16x2 I2C** | Interfaz de comunicación en tiempo real para el usuario. |
+| **Arduino Uno (x2)** | Cerebros distribuidos y procesamiento de datos. |
+| **ESP32** | Conectividad WiFi y monitoreo de variables ambientales. | **(Todavía no implementado)**
+| **LCD 16x2 I2C (x2)** | Interfaz de comunicación en tiempo real para el usuario. |
 | **Anemómetros y Paneles** | Captación de energía cinética y solar. |
-| **Sensor DHT22** | Medición de temperatura y humedad ambiental. |
+| **Sensor DHT11** | Medición de temperatura y humedad ambiental. |
 | **Batería 6V** | Almacenamiento de energía de respaldo. |
 
 ## 👥 Equipo de Robótica
