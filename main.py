@@ -1,161 +1,149 @@
 import tkinter as tk
-from tkinter import messagebox, filedialog
-import serial
-import serial.tools.list_ports
+from tkinter import messagebox
+import json
 import threading
+import paho.mqtt.client as mqtt
 import time
-import ast
-import sys
+from datetime import datetime
+import os
 
-class WeatherApp:
+class MonitorEcoEdificio:
     def __init__(self, root):
         self.root = root
-        self.root.title("Monitor Meteorológico RF - EcoEdificio")
-        self.root.geometry("800x600")
-        self.root.configure(bg="#2c3e50")
+        self.root.title("Eco-Edificio Control Panel - Sistema de Telemetría")
+        self.root.geometry("950x800")
+        self.root.configure(bg="#121212")
 
-        # Variables de datos
+        self.archivo_log = "log_eco.txt"
         self.temp_history = [0] * 50
         self.hum_history = [0] * 50
-        self.FILE_SIGNATURE = "ECO-EDIFICIO-DATA-v1"
-        self.ser = None
-        self.running = True 
-
-        # Protocolo de cierre
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-
-        # 1. Montar la interfaz primero (ESTÉTICA ORIGINAL)
+        self.wind_history = [0] * 50
+        self.id_actual = ""
+        
+        self.conectado = False
         self.setup_ui()
-        
-        # 2. Iniciar la búsqueda del Arduino después de que la ventana sea visible
-        self.root.after(1000, self.start_detection)
-
-    def setup_ui(self):
-        # Frame de etiquetas
-        self.frame = tk.Frame(self.root, bg="#2c3e50")
-        self.frame.pack(pady=15)
-        
-        self.lbl_t = tk.Label(self.frame, text="Temp: --°C", font=("Arial", 22, "bold"), fg="#e74c3c", bg="#2c3e50")
-        self.lbl_t.pack(side=tk.LEFT, padx=30)
-        
-        self.lbl_h = tk.Label(self.frame, text="Hum: --%", font=("Arial", 22, "bold"), fg="#3498db", bg="#2c3e50")
-        self.lbl_h.pack(side=tk.LEFT, padx=30)
-        
-        # Barra de estado
-        self.lbl_status = tk.Label(self.root, text="Iniciando...", font=("Arial", 9), fg="white", bg="#34495e")
-        self.lbl_status.pack(fill=tk.X)
-        
-        # Gráfico
-        self.canvas = tk.Canvas(self.root, width=700, height=300, bg="black", highlightthickness=0)
-        self.canvas.pack(pady=10)
-        
-        # Botones
-        btn_f = tk.Frame(self.root, bg="#2c3e50")
-        btn_f.pack(pady=20)
-        tk.Button(btn_f, text="Generar Informe .eco", command=self.export_eco, bg="#27ae60", fg="white", width=20).pack(side=tk.LEFT, padx=10)
-        tk.Button(btn_f, text="Abrir Archivo .eco", command=self.import_eco, bg="#f39c12", fg="white", width=20).pack(side=tk.LEFT, padx=10)
-
-    def start_detection(self):
-        """Lanza el hilo de búsqueda para no congelar la GUI"""
-        threading.Thread(target=self.detect_arduino_logic, daemon=True).start()
         self.update_canvas()
 
-    def detect_arduino_logic(self):
-        self.lbl_status.config(text="Buscando sensor en puertos disponibles...", fg="#f1c40f")
-        ports = list(serial.tools.list_ports.comports())
+    def setup_ui(self):
+        # --- Barra Superior ---
+        top = tk.Frame(self.root, bg="#1e1e1e", pady=15)
+        top.pack(fill=tk.X)
         
-        for p in ports:
-            # Filtro básico para no colgarse con Bluetooth
-            if "Bluetooth" in p.description: continue
-            
-            try:
-                # Intento de conexión
-                test_ser = serial.Serial(p.device, 9600, timeout=1)
-                time.sleep(2) # Tiempo para que Arduino inicie
-                
-                # Leer una línea para validar datos "temp,hum"
-                line = test_ser.readline().decode('utf-8', errors='ignore').strip()
-                
-                if ',' in line:
-                    self.ser = test_ser
-                    self.lbl_status.config(text=f"CONECTADO: {p.device}", fg="#2ecc71")
-                    # Iniciar bucle de lectura real
-                    threading.Thread(target=self.read_loop, daemon=True).start()
-                    return
-                else:
-                    test_ser.close()
-            except:
-                continue
+        tk.Label(top, text="ID ESP32:", fg="white", bg="#1e1e1e").pack(side=tk.LEFT, padx=10)
+        self.ent_id = tk.Entry(top, font=("Consolas", 11), width=15, bg="#2d2d2d", fg="#00ff00", insertbackground="white")
+        self.ent_id.pack(side=tk.LEFT, padx=5)
+
+        self.btn_con = tk.Button(top, text="CONECTAR", command=self.conectar, bg="#2ecc71", fg="white", font=("Arial", 9, "bold"))
+        self.btn_con.pack(side=tk.LEFT, padx=5)
+
+        self.btn_des = tk.Button(top, text="DESCONECTAR", command=self.desconectar, bg="#e74c3c", fg="white", state="disabled", font=("Arial", 9, "bold"))
+        self.btn_des.pack(side=tk.LEFT, padx=5)
+
+        # --- Indicadores Gigantes ---
+        mid = tk.Frame(self.root, bg="#121212")
+        mid.pack(pady=30)
+        self.lbl_t = tk.Label(mid, text="0.0°C", fg="#ff4444", bg="#121212", font=("Courier", 35, "bold"))
+        self.lbl_t.pack(side=tk.LEFT, padx=25)
+        self.lbl_h = tk.Label(mid, text="0.0%", fg="#4444ff", bg="#121212", font=("Courier", 35, "bold"))
+        self.lbl_h.pack(side=tk.LEFT, padx=25)
+        self.lbl_w = tk.Label(mid, text="0.0m/s", fg="#2ecc71", bg="#121212", font=("Courier", 35, "bold"))
+        self.lbl_w.pack(side=tk.LEFT, padx=25)
+
+        # --- Gráfico en Tiempo Real ---
+        self.canvas = tk.Canvas(self.root, width=850, height=350, bg="#000000", highlightbackground="#333")
+        self.canvas.pack(pady=10)
+
+        # --- Barra de Estado ---
+        self.status = tk.Label(self.root, text="Listo para capturar telemetría", bg="#000", fg="gray", anchor="w")
+        self.status.pack(side="bottom", fill="x")
+
+    def conectar(self):
+        self.id_actual = self.ent_id.get().strip().upper()
+        if not self.id_actual:
+            messagebox.showwarning("ID Requerido", "Ingresa el ID del ESP32 para iniciar el registro.")
+            return
+
+        # Crear encabezado si el archivo es nuevo
+        if not os.path.exists(self.archivo_log):
+            with open(self.archivo_log, "w", encoding="utf-8") as f:
+                f.write("FECHA,HORA,VIENTO,TEMP,HUM\n")
+
+        self.conectado = True
+        self.btn_con.config(state="disabled")
+        self.btn_des.config(state="normal")
+        self.ent_id.config(state="disabled")
+        self.status.config(text=f"REGISTRANDO: {self.id_actual} - Los datos se guardan automáticamente", fg="#00ff00")
         
-        # Si termina el bucle y no hay sensor:
-        self.lbl_status.config(text="MODO VISOR - Sensor no detectado", fg="#e67e22")
+        threading.Thread(target=self.mqtt_worker, daemon=True).start()
 
-    def read_loop(self):
-        while self.running and self.ser:
-            try:
-                if self.ser.in_waiting > 0:
-                    line = self.ser.readline().decode('utf-8', errors='ignore').strip()
-                    if ',' in line:
-                        t, h = map(float, line.split(','))
-                        self.root.after(0, self.update_data, t, h)
-            except:
-                break
-            time.sleep(0.1)
+    def desconectar(self):
+        self.conectado = False
+        self.btn_con.config(state="normal")
+        self.btn_des.config(state="disabled")
+        self.ent_id.config(state="normal")
+        self.status.config(text="Registro detenido", fg="gray")
 
-    def update_data(self, t, h):
+    def mqtt_worker(self):
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        client.on_message = self.on_message
+        try:
+            client.connect("broker.emqx.io", 1883, 60)
+            client.subscribe("ecoedificio/data/principal")
+            client.loop_forever()
+        except:
+            self.status.config(text="Error de red / Broker no disponible", fg="red")
+
+    def on_message(self, client, userdata, msg):
+        if not self.conectado: return
+        try:
+            data = json.loads(msg.payload.decode())
+            # Filtro por ID introducido por el usuario
+            if str(data.get("id")).upper() == self.id_actual:
+                t = float(data.get("temp", 0))
+                h = float(data.get("hum", 0))
+                w = float(data.get("wind", 0))
+                
+                # --- GUARDADO EN TXT (FORMATO COMPATIBLE CON ANALIZADOR) ---
+                ahora = datetime.now()
+                # Fecha: DD/MM/YY | Hora: HH:MM:SS (24h para el archivo)
+                linea = f"{ahora.strftime('%d/%m/%y,%H:%M:%S')},{w},{t},{h}\n"
+                
+                with open(self.archivo_log, "a", encoding="utf-8") as f:
+                    f.write(linea)
+                    f.flush() # Guardado inmediato en disco
+
+                # Actualizar pantalla
+                self.root.after(0, self.update_data, t, h, w)
+        except:
+            pass
+
+    def update_data(self, t, h, w):
         self.temp_history.append(t); self.temp_history.pop(0)
         self.hum_history.append(h); self.hum_history.pop(0)
-        self.lbl_t.config(text=f"Temp: {t:.1f}°C")
-        self.lbl_h.config(text=f"Hum: {h:.1f}%")
-
-    def plot(self, data, color, y_range):
-        if not data: return
-        w, h = 700, 300
-        min_y, max_y = y_range
-        points = []
-        for i, val in enumerate(data):
-            x = i * (w / (len(data)-1))
-            div = (max_y - min_y) if (max_y - min_y) != 0 else 1
-            y = h - ((val - min_y) / div * h)
-            points.append(x); points.append(y)
-        if len(points) > 3:
-            self.canvas.create_line(points, fill=color, width=2)
+        self.wind_history.append(w); self.wind_history.pop(0)
+        self.lbl_t.config(text=f"{t:.1f}°C")
+        self.lbl_h.config(text=f"{h:.1f}%")
+        self.lbl_w.config(text=f"{w:.1f}m/s")
 
     def update_canvas(self):
-        if not self.running: return
         self.canvas.delete("all")
-        # Rejilla
-        for i in range(0, 301, 50):
-            self.canvas.create_line(0, i, 700, i, fill="#1a252f")
-        # Líneas
-        self.plot(self.temp_history, "#e74c3c", (0, 50))
-        self.plot(self.hum_history, "#3498db", (0, 100))
+        # Cuadrícula decorativa
+        for i in range(0, 851, 85): self.canvas.create_line(i, 0, i, 350, fill="#111")
+        
+        # Dibujar líneas de sensores
+        self.draw_line(self.temp_history, "#ff4444", (0, 50))
+        self.draw_line(self.hum_history, "#4444ff", (0, 100))
+        self.draw_line(self.wind_history, "#2ecc71", (0, 30))
         self.root.after(100, self.update_canvas)
 
-    def import_eco(self):
-        path = filedialog.askopenfilename(filetypes=[("Archivos Eco", "*.eco")])
-        if path:
-            try:
-                with open(path, "r") as f:
-                    lines = f.readlines()
-                    self.temp_history = ast.literal_eval(lines[1].strip())
-                    self.hum_history = ast.literal_eval(lines[2].strip())
-                    self.update_data(self.temp_history[-1], self.hum_history[-1])
-            except:
-                messagebox.showerror("Error", "Archivo inválido.")
-
-    def export_eco(self):
-        path = filedialog.asksaveasfilename(defaultextension=".eco", filetypes=[("Archivos Eco", "*.eco")])
-        if path:
-            with open(path, "w") as f:
-                f.write(f"{self.FILE_SIGNATURE}\n{self.temp_history}\n{self.hum_history}")
-
-    def on_closing(self):
-        self.running = False
-        if self.ser: self.ser.close()
-        self.root.destroy()
+    def draw_line(self, data, color, scale):
+        w, h = 850, 350
+        pts = []
+        for i, val in enumerate(data):
+            x = i * (w / 49)
+            y = h - ((val - scale[0]) / (scale[1] - scale[0]) * h)
+            pts.extend([x, y])
+        if len(pts) >= 4: self.canvas.create_line(*pts, fill=color, width=2)
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = WeatherApp(root)
-    root.mainloop()
+    root = tk.Tk(); app = MonitorEcoEdificio(root); root.mainloop()
