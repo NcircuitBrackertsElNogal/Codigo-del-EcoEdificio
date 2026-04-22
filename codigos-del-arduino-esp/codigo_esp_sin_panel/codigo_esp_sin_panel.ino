@@ -4,8 +4,8 @@
 #include <LiquidCrystal_I2C.h>
 
 // --- CONFIGURACIÓN WIFI Y MQTT ---
-const char* ssid     = "Santiago";
-const char* password = "15163087";
+const char* ssid     = "TU_SSID";
+const char* password = "TU_CLAVE";
 const char* mqtt_server = "broker.emqx.io";
 
 // --- CONFIGURACIÓN ANEMÓMETRO ---
