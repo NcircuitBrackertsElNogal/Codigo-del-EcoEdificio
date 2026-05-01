@@ -51,5 +51,7 @@ El proyecto evolucionó de una **maqueta representativa** (construida con polies
 * **Energía Hidráulica:** Implementación de turbinas que aprovechen el agua residual de los aires acondicionados.
 * **Riego Automatizado:** Uso de excedentes de agua para el mantenimiento de áreas verdes (jardines verticales).
 
+## 🏆 Reconocimientos
+Segundo Lugar Consecutivo en la categoría "Futuros Innovadores" En El II y III Encuentro de robótica zulia .
 ---
 > "Transformando la física aplicada en soluciones urbanas autosuficientes."
